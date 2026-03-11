@@ -22,7 +22,7 @@ charPred f =
         (x : xs) -> if f x then Just (x, xs) else Nothing
     )
 
--- String char parsers
+-- String parsers
 match :: String -> Parser String
 match [] = pure ""
 match (x : xs) = do
@@ -33,8 +33,9 @@ match (x : xs) = do
 -- Repetition parsers
 many1 :: Parser a -> Parser [a]
 many1 p = do
-  _ <- p
-  many1 p <|> pure []
+  x <- p
+  acc <- many1 p <|> pure []
+  return (x : acc)
 
 many0 :: Parser a -> Parser [a]
 many0 p = many1 p <|> pure []
