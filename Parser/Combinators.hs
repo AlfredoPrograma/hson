@@ -5,7 +5,7 @@ module Parser.Combinators where
 import Control.Applicative (Alternative, empty, (<|>))
 import Parser.Monad
 
--- Single char parsers
+-- Single chars
 char :: Char -> Parser Char
 char ch =
   Parser
@@ -22,7 +22,7 @@ charPred f =
         (x : xs) -> if f x then Just (x, xs) else Nothing
     )
 
--- String parsers
+-- String
 match :: String -> Parser String
 match [] = pure ""
 match (x : xs) = do
@@ -30,7 +30,7 @@ match (x : xs) = do
   acc <- match xs
   return (x : acc)
 
--- Repetition parsers
+-- Repetitions
 many1 :: Parser a -> Parser [a]
 many1 p = do
   x <- p
@@ -40,10 +40,27 @@ many1 p = do
 many0 :: Parser a -> Parser [a]
 many0 p = many1 p <|> pure []
 
--- Delimiter parsers
+-- Disjunction
+or :: [Parser a] -> Parser a
+or = foldl1 (<|>)
+
+-- Delimiters
 bracket :: Parser a -> Parser b -> Parser c -> Parser b
 bracket open p close = do
   _ <- open
   content <- p
   _ <- close
   return content
+
+-- Separators
+sepBy1 :: Parser a -> Parser b -> Parser [a]
+sepBy1 p sep = do
+  v <- p
+  acc <-
+    many1
+      ( do
+          _ <- sep
+          p
+      )
+      <|> pure []
+  return (v : acc)

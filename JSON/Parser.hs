@@ -1,65 +1,105 @@
-module Parser where
+module JSON.Parser where
 
 import Control.Applicative ((<|>))
 import Data.Char (isAlphaNum, isDigit, isSpace, toUpper)
-import Data.Map (Map)
+import Data.Map qualified as Map
 import Parser.Combinators
 import Parser.Monad
 
--- Reference: https://www.crockford.com/mckeeman.html
-
 data JSONValue
-  = JSONObject (Map String JSONValue)
+  = JSONObject (Map.Map String JSONValue)
   | JSONArray [JSONValue]
   | JSONString String
-  | JSONNumber Int
+  | JSONNumber Float
   | JSONBoolean Bool
   | JSONNull
   deriving (Show)
 
--- parseObject :: Parser JSONValue
--- parseObject = do
---   obj <- bracket (char '{') _ (char '}')
---   return (JSONObject obj)
+jsonValue :: Parser JSONValue
+jsonValue =
+  Parser.Combinators.or
+    [ jsonObject,
+      jsonArray,
+      jsonString,
+      jsonNumber,
+      jsonBool,
+      jsonNull
+    ]
 
--- parseArray :: Parser JSONValue
--- parseArray = do
---   arr <- bracket (char '[') _ (char ']')
---   return (JSONArray arr)
+member :: Parser (String, JSONValue)
+member = do
+  _ <- whitespaces
+  key <- string
+  _ <- whitespaces
+  _ <- char ':'
+  val <- element
+  return (key, val)
 
-parseString :: Parser JSONValue
-parseString = do
-  content <- bracket (char '"') string (char '"')
-  return (JSONString content)
+members :: Parser [(String, JSONValue)]
+members = sepBy1 member (char ',')
 
-parseNumber :: Parser JSONValue
-parseNumber = JSONNumber . read <$> number
+element :: Parser JSONValue
+element = do
+  _ <- whitespaces
+  el <- jsonValue
+  _ <- whitespaces
+  return el
 
-parseBoolean :: Parser JSONValue
-parseBoolean = do
-  bool <- match "true" <|> match "false"
-  return (JSONBoolean (read (capitalize bool)))
+elements :: Parser [JSONValue]
+elements = sepBy1 element (char ',')
+
+jsonObject :: Parser JSONValue
+jsonObject = bracket (char '{') obj (char '}')
   where
-    capitalize [] = ""
-    capitalize (x : xs) = toUpper x : xs
+    valuesObj = fmap (JSONObject . Map.fromList) members
+    emptyObj = fmap (\_ -> JSONObject Map.empty) whitespaces
+    obj = valuesObj <|> emptyObj
 
-parseNull :: Parser JSONValue
-parseNull = do
-  _ <- match "null"
-  return JSONNull
+jsonArray :: Parser JSONValue
+jsonArray = bracket (char '[') arr (char ']')
+  where
+    emptyArr = fmap (\_ -> JSONArray []) whitespaces
+    valuesArr = fmap JSONArray elements
+    arr = valuesArr <|> emptyArr
+
+jsonString :: Parser JSONValue
+jsonString = JSONString <$> string
+
+jsonNumber :: Parser JSONValue
+jsonNumber = JSONNumber . read <$> number
+
+jsonBool :: Parser JSONValue
+jsonBool = true <|> false
+  where
+    true = fmap (const $ JSONBoolean True) (match "true")
+    false = fmap (const $ JSONBoolean False) (match "false")
+
+jsonNull :: Parser JSONValue
+jsonNull = fmap (const JSONNull) (match "null")
 
 string :: Parser String
-string = do
-  x <- charPred isAlphaNum
-  acc <- string <|> pure ""
-  return (x : acc)
+string = bracket (char '"') characters (char '"')
 
+characters :: Parser String
+characters = many0 character
+
+-- TODO: handle escaped characters using `escape` function
 character :: Parser Char
--- TODO: parse character uwu
-character = undefined
+character = charPred (\ch -> ch >= '\x0020' && ch <= '\x10FFFF' && ch `notElem` ['"', '\\'])
 
 escape :: Parser String
-escape = charAsStr '"' <|> charAsStr '\\' <|> charAsStr '/' <|> charAsStr 'b' <|> charAsStr 'f' <|> charAsStr 'n' <|> charAsStr 'r' <|> charAsStr 't' <|> escapedHex
+escape =
+  Parser.Combinators.or
+    [ charAsStr '"',
+      charAsStr '\\',
+      charAsStr '/',
+      charAsStr 'b',
+      charAsStr 'f',
+      charAsStr 'n',
+      charAsStr 'r',
+      charAsStr 't',
+      escapedHex
+    ]
   where
     charAsStr ch = fmap (: []) (char ch)
     escapedHex = do
@@ -71,7 +111,7 @@ escape = charAsStr '"' <|> charAsStr '\\' <|> charAsStr '/' <|> charAsStr 'b' <|
       return [u, hx1, hx2, hx3, hx4]
 
 hex :: Parser Char
-hex = digit <|> lowerHex <|> upperHex
+hex = Parser.Combinators.or [digit, lowerHex, upperHex]
   where
     lowerHex = charPred (\ch -> ch >= 'a' && ch <= 'f')
     upperHex = charPred (\ch -> ch >= 'A' && ch <= 'F')
@@ -80,7 +120,7 @@ number :: Parser String
 number = do
   int <- integer
   float <- fraction
-  exp <- Parser.exponent
+  exp <- jsonExponent
   return (int ++ float ++ exp)
 
 integer :: Parser String
@@ -117,8 +157,8 @@ digit = char '0' <|> onenine
 onenine :: Parser Char
 onenine = charPred (\ch -> ch >= '1' && ch <= '9')
 
-exponent :: Parser String
-exponent = exp <|> pure ""
+jsonExponent :: Parser String
+jsonExponent = exp <|> pure ""
   where
     exp = do
       e <- char 'E' <|> char 'e'
